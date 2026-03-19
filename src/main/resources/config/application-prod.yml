@@ -1,0 +1,26 @@
+server:
+  port: 8080
+
+spring:
+  # 数据源配置
+  datasource:
+      driver-class-name: com.mysql.cj.jdbc.Driver # mysql的驱动你可以配置别的关系型数据库
+      url: jdbc:mysql://rm-2zeyh356r8r26rw66.mysql.rds.aliyuncs.com:3306/prod_irontower_vpa?serverTimezone=Asia/Shanghai&characterEncoding=utf-8&useSSL=false&useUnicode=true #数据源地址
+      username: prod_irontower_vpa # 用户名
+      password: dwfs#m%Y)z_S3 # 密码
+
+redis:
+  host: facility-beijing-redis-svc
+  port: 6379
+  timeout: 3600
+  password:
+  database: 0
+  pool:
+    maxTotal: 1000
+    maxIdle: 100
+    maxWaitMillis: 100000
+    minIdle: 80
+
+
+
+

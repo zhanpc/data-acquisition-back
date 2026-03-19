@@ -1,0 +1,38 @@
+spring:
+  profiles:
+    active: test
+  main:
+    allow-bean-definition-overriding: true
+  servlet:
+    multipart:
+      max-file-size: 500MB
+      max-request-size: 500MB
+
+mybatis-plus:
+  mapper-locations: classpath:mapper/**/*.xml
+  type-aliases-package: com.maplestone.dataCollect.dao.mapper.**
+  configuration:
+    map-underscore-to-camel-case: true #采用驼峰命名 映射下划线字段配置
+    #log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+logging:
+  config: classpath:config/logback.xml
+  level:
+    '[com.maplestone.dataCollect.dao.mapper.**]': debug
+
+web:
+  file:
+    root: /data/dataCollect
+    path: /file/document
+
+springdoc:
+  api-docs:
+    #是否开启文档功能
+    enabled: true
+    #swagger后端请求地址
+    path: /api-docs
+  swagger-ui:
+    #自定义swagger前端请求路径，输入http：127.0.0.1:8080/test会自动重定向到swagger页面
+    path: /test
+  #包扫描路径
+  packages-to-scan: com.maplestone.dataCollect.controller

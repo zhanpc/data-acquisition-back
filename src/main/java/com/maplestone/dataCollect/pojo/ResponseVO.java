@@ -1,0 +1,116 @@
+package com.maplestone.dataCollect.pojo;
+
+import cn.hutool.http.HttpStatus;
+import lombok.Data;
+
+import java.io.Serializable;
+
+import com.maplestone.dataCollect.common.constant.ResponseStatusEnum;
+
+@Data
+public class ResponseVO<T> implements Serializable {
+
+    private Integer code;
+
+    private String msg;
+
+    private T data;
+
+    public ResponseVO() {
+
+    }
+
+    public ResponseVO(Integer code, String msg) {
+        this.code = code;
+        this.msg = msg;
+    }
+
+    public ResponseVO(Integer code, T data) {
+        this.code = code;
+        this.data = data;
+    }
+
+    public ResponseVO(Integer code, String msg, T data) {
+        this.code = code;
+        this.msg = msg;
+        this.data = data;
+    }
+
+    private ResponseVO(ResponseStatusEnum resultStatus, T data) {
+        this.code = resultStatus.getCode();
+        this.msg = resultStatus.getMsg();
+        this.data = data;
+    }
+
+    /**
+     * 业务成功返回业务代码和描述信息
+     */
+    public static ResponseVO<Void> success() {
+        return new ResponseVO<Void>(ResponseStatusEnum.SUCCESS, null);
+    }
+
+    /**
+     * 业务成功返回业务代码,描述和返回的参数
+     */
+    public static <T> ResponseVO<T> success(T data) {
+        return new ResponseVO<T>(ResponseStatusEnum.SUCCESS, data);
+    }
+
+    /**
+     * 业务成功返回业务代码,描述和返回的参数
+     */
+    public static <T> ResponseVO<T> success(ResponseStatusEnum resultStatus, T data) {
+        if (resultStatus == null) {
+            return success(data);
+        }
+        return new ResponseVO<T>(resultStatus, data);
+    }
+
+    /**
+     * 业务异常返回业务代码和描述信息
+     */
+    public static <T> ResponseVO<T> failure() {
+        return new ResponseVO<T>(ResponseStatusEnum.SYSTEM_ERROR, null);
+    }
+
+    /**
+     * 业务异常返回业务代码,描述和返回的参数
+     */
+    public static <T> ResponseVO<T> failure(ResponseStatusEnum resultStatus) {
+        return failure(resultStatus, null);
+    }
+
+    /**
+     * 业务异常返回业务代码,描述和返回的参数
+     */
+    public static <T> ResponseVO<T> failure(ResponseStatusEnum resultStatus, T data) {
+        if (resultStatus == null) {
+            return new ResponseVO<T>(ResponseStatusEnum.SYSTEM_ERROR, null);
+        }
+        return new ResponseVO<T>(resultStatus, data);
+    }
+
+    public static <T> ResponseVO<T> failure(Integer code, String msg) {
+        return new ResponseVO<T>(code, msg);
+    }
+
+    public static <T> ResponseVO<T> getStatusJoMsg(boolean result, String success, String failed) {
+        if (result) {
+            return new ResponseVO<T>(HttpStatus.HTTP_OK, success);
+        } else {
+            return new ResponseVO<T>(HttpStatus.HTTP_BAD_REQUEST, failed);
+        }
+    }
+
+    public static <T> ResponseVO<T> getStatusJoMsg(boolean result, String msg) {
+        if (result) {
+            return new ResponseVO<T>(HttpStatus.HTTP_OK, msg);
+        } else {
+            return new ResponseVO<T>(HttpStatus.HTTP_BAD_REQUEST, msg);
+        }
+    }
+
+    public static <T> ResponseVO<T> getFailureResponseJoMsg(String message) {
+        return new ResponseVO<T>(HttpStatus.HTTP_BAD_REQUEST, message);
+    }
+}

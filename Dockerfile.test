@@ -1,0 +1,15 @@
+FROM registry.cn-zhangjiakou.aliyuncs.com/dianweimaplestone/maven_base_build_image:maven-3.8-jdk-8-v1 AS compile_stage
+
+ADD ./ /root/
+
+RUN cd /root \
+     && mvn -q -DskipTests=true package
+
+FROM registry.cn-zhangjiakou.aliyuncs.com/dianweimaplestone/java_base_run_image:8-jdk AS image_stage
+
+COPY --from=compile_stage /root/target/app.jar /
+COPY --from=compile_stage /root/startup.sh /
+
+EXPOSE 80
+
+ENTRYPOINT ["sh", "/startup.sh"]

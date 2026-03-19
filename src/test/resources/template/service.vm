@@ -1,0 +1,15 @@
+package ${cfg.parentPackage}.service.impl${cfg.moduleName};
+
+import ${cfg.parentPackage}.service.BaseIService;
+import ${cfg.parentPackage}.dao.entity${cfg.moduleName}.${cfg.tableName};
+import ${cfg.parentPackage}.dao.mapper${cfg.moduleName}.${cfg.tableName}Mapper;
+
+import org.springframework.stereotype.Service;
+
+/**
+* 表服务实现类
+*/
+@Service
+public class ${cfg.tableName}Service extends BaseIService<${cfg.tableName}Mapper, ${cfg.tableName}> {
+
+}

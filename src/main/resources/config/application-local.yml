@@ -1,0 +1,34 @@
+server:
+  port: 8808
+
+spring:
+  # 数据源配置
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver # mysql的驱动你可以配置别的关系型数据库
+    url: jdbc:mysql://127.0.0.1:3306/test_beaconManage?serverTimezone=Asia/Shanghai&characterEncoding=utf-8&useSSL=false&useUnicode=true #数据源地址
+    username: beaconUser # 用户名
+    password: Jsjg1221@ # 密码
+#    password: Jsjg1221@ # 密码
+#    username: root # 用户名
+#    password: root # 密码
+#      driver-class-name: com.mysql.cj.jdbc.Driver # mysql的驱动你可以配置别的关系型数据库
+#      url: jdbc:mysql://rm-8vb68l9y9c4nd343x58870.mysql.zhangbei.rds.aliyuncs.com:3306/test_dakuayue?serverTimezone=Asia/Shanghai&characterEncoding=utf-8&useSSL=false&useUnicode=true #数据源地址
+#      username: test_dakuayue # 用户名
+#      password: Dwfs_dky#slxs253 # 密码
+
+redis:
+  host: 127.0.0.1
+  port: 6379
+  timeout: 3600
+  password: H19MstxAfG0G5yWB
+#  password:
+  database: 0
+  pool:
+    maxTotal: 1000
+    maxIdle: 100
+    maxWaitMillis: 100000
+    minIdle: 80
+
+
+
+

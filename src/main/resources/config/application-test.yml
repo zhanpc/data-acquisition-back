@@ -1,0 +1,63 @@
+server:
+  port: 8005
+
+spring:
+  # MySQL 数据源配置（配置数据）
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://192.168.3.55:3306/iot_config?serverTimezone=Asia/Shanghai&characterEncoding=utf-8&useSSL=false&useUnicode=true
+    username: root
+    password: root
+  
+  # Kafka 配置
+  kafka:
+    bootstrap-servers: 192.168.3.55:9092
+    producer:
+      acks: 1
+      retries: 10
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+    consumer:
+      group-id: iot-data-consumer
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      max-poll-records: 1000
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: com.maplestone.dataCollect.pojo.entity
+
+# TDengine 数据源配置（时序数据）
+tdengine:
+  datasource:
+    driver-class-name: com.taosdata.jdbc.TSDBDriver
+    url: jdbc:TAOS://192.168.3.55:6030/iot_data?charset=UTF-8&locale=en_US.UTF-8&timezone=UTC-8
+    username: root
+    password: taosdata
+
+redis:
+  host: 192.168.3.55
+  port: 6379
+  timeout: 3600
+  #  password: H19MstxAfG0G5yWB
+  password:
+  database: 0
+  pool:
+    maxTotal: 1000
+    maxIdle: 100
+    maxWaitMillis: 100000
+    minIdle: 80
+
+# WAL 本地备份配置
+wal:
+  enabled: true
+  base-path: /data/wal
+  max-file-size: 10485760  # 10MB
+  retention-hours: 24
+
+
+
+
