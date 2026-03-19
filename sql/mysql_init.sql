@@ -1,4 +1,8 @@
 -- 数据采集系统 MySQL 配置数据库初始化脚本
+-- 设计原则：
+-- 1. station_config 管理连接级配置，一个场站一条记录
+-- 2. point_config 管理测点映射，一个场站多个测点
+-- 3. TDengine 推荐按“每个测点一个子表”建表，table_name 在 point_config 中唯一维护
 
 -- 创建数据库
 CREATE DATABASE IF NOT EXISTS iot_config CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -10,10 +14,11 @@ CREATE TABLE IF NOT EXISTS station_config (
     id INT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
     station_id INT UNIQUE NOT NULL COMMENT '场站ID',
     station_name VARCHAR(100) NOT NULL COMMENT '场站名称',
-    protocol VARCHAR(20) NOT NULL COMMENT '协议类型: IEC104/MODBUS_TCP/MODBUS_RTU',
-    host VARCHAR(50) NOT NULL COMMENT '设备IP地址',
-    port INT NOT NULL COMMENT '端口号',
-    status TINYINT DEFAULT 1 COMMENT '状态: 0-离线 1-在线',
+    protocol VARCHAR(20) NOT NULL COMMENT '协议类型: IEC_104/MODBUS_TCP/MODBUS_RTU',
+    host VARCHAR(100) DEFAULT NULL COMMENT 'TCP/IP 设备主机地址，RTU 可为空',
+    port INT DEFAULT NULL COMMENT 'TCP/IP 设备端口，RTU 可为空',
+    status TINYINT DEFAULT 1 COMMENT '状态: 0-禁用 1-启用',
+    extra_params TEXT COMMENT '扩展参数(JSON)，用于 MODBUS_RTU 等协议',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     INDEX idx_status (status),
@@ -28,15 +33,19 @@ CREATE TABLE IF NOT EXISTS point_config (
     point_name VARCHAR(100) NOT NULL COMMENT '测点名称',
     data_type VARCHAR(20) NOT NULL COMMENT '数据类型: FLOAT/INT/BOOL',
     unit VARCHAR(20) COMMENT '单位',
-    table_name VARCHAR(100) NOT NULL COMMENT 'TDengine表名',
+    table_name VARCHAR(100) NOT NULL COMMENT 'TDengine 子表名，推荐规则: pt_{station_id}_{point_id}',
     ioa INT COMMENT 'IEC104信息对象地址',
     address INT COMMENT 'Modbus寄存器地址',
     register_type VARCHAR(20) COMMENT 'Modbus寄存器类型: HOLDING/INPUT/COIL/DISCRETE',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     UNIQUE KEY uk_station_point (station_id, point_id),
+    UNIQUE KEY uk_table_name (table_name),
     INDEX idx_station (station_id),
-    INDEX idx_table_name (table_name)
+    INDEX idx_table_name (table_name),
+    INDEX idx_station_ioa (station_id, ioa),
+    INDEX idx_station_address (station_id, address),
+    CONSTRAINT fk_point_station FOREIGN KEY (station_id) REFERENCES station_config (station_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='测点配置表';
 
 -- 告警规则表
@@ -65,26 +74,30 @@ CREATE TABLE IF NOT EXISTS alarm_history (
     alarm_message TEXT COMMENT '告警消息',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     INDEX idx_station_time (station_id, alarm_time),
+    INDEX idx_station_point_time (station_id, point_id, alarm_time),
     INDEX idx_time (alarm_time),
     INDEX idx_level (alarm_level)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='告警历史表';
 
 -- 插入测试数据
-INSERT INTO station_config (station_id, station_name, protocol, host, port, status) VALUES
-(1, '测试场站001', 'IEC104', '192.168.1.100', 2404, 1),
-(2, '测试场站002', 'MODBUS_TCP', '192.168.1.101', 502, 1);
+INSERT INTO station_config (station_id, station_name, protocol, host, port, status, extra_params) VALUES
+(1, '测试场站001', 'IEC_104', '192.168.1.100', 2404, 1, NULL),
+(2, '测试场站002', 'MODBUS_TCP', '192.168.1.101', 502, 1, NULL),
+(3, '测试场站003', 'MODBUS_RTU', NULL, NULL, 1, '{"portName":"COM1","baudRate":9600,"dataBits":8,"stopBits":1,"parity":"None"}');
 
 INSERT INTO point_config (station_id, point_id, point_name, data_type, unit, table_name, ioa) VALUES
-(1, 1, '电压', 'FLOAT', 'V', 'station_001_iec', 1001),
-(1, 2, '电流', 'FLOAT', 'A', 'station_001_iec', 1002),
-(1, 3, '功率', 'FLOAT', 'kW', 'station_001_iec', 1003);
+(1, 1, '电压', 'FLOAT', 'V', 'pt_1_1', 1001),
+(1, 2, '电流', 'FLOAT', 'A', 'pt_1_2', 1002),
+(1, 3, '功率', 'FLOAT', 'kW', 'pt_1_3', 1003);
 
 INSERT INTO point_config (station_id, point_id, point_name, data_type, unit, table_name, address, register_type) VALUES
-(2, 1, '温度', 'FLOAT', '℃', 'station_002_modbus', 0, 'HOLDING'),
-(2, 2, '湿度', 'FLOAT', '%', 'station_002_modbus', 1, 'HOLDING'),
-(2, 3, '压力', 'FLOAT', 'Pa', 'station_002_modbus', 2, 'HOLDING');
+(2, 1, '温度', 'FLOAT', '℃', 'pt_2_1', 0, 'HOLDING'),
+(2, 2, '湿度', 'FLOAT', '%', 'pt_2_2', 1, 'HOLDING'),
+(2, 3, '压力', 'FLOAT', 'Pa', 'pt_2_3', 2, 'HOLDING'),
+(3, 1, '流量', 'FLOAT', 'm3/h', 'pt_3_1', 0, 'HOLDING');
 
 INSERT INTO alarm_rule (station_id, point_id, upper_limit, lower_limit, alarm_level, enabled) VALUES
 (1, 1, 250.0, 200.0, 'WARNING', 1),
 (1, 2, 100.0, 0.0, 'ERROR', 1),
-(2, 1, 50.0, -10.0, 'WARNING', 1);
+(2, 1, 50.0, -10.0, 'WARNING', 1),
+(3, 1, 120.0, 0.0, 'WARNING', 1);
