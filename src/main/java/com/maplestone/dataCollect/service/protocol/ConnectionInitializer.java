@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.maplestone.dataCollect.cache.ConfigCache;
 import com.maplestone.dataCollect.dao.entity.StationConfig;
+import com.maplestone.dataCollect.service.config.StationRuntimeStatusService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
@@ -28,6 +29,9 @@ public class ConnectionInitializer implements CommandLineRunner {
     @Autowired
     private DataAcquisitionService dataAcquisitionService;
 
+    @Autowired
+    private StationRuntimeStatusService stationRuntimeStatusService;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
@@ -42,8 +46,10 @@ public class ConnectionInitializer implements CommandLineRunner {
 
             boolean success = dataAcquisitionService.connect(connectionId, protocol, config.getStationId(), params);
             if (success) {
+                stationRuntimeStatusService.markConnectSuccess(config.getStationId());
                 log.info("场站连接成功: stationId={}, protocol={}", config.getStationId(), protocol);
             } else {
+                stationRuntimeStatusService.markConnectFailure(config.getStationId(), "初始化连接失败");
                 log.warn("场站连接失败: stationId={}, protocol={}", config.getStationId(), protocol);
             }
         }
@@ -53,22 +59,21 @@ public class ConnectionInitializer implements CommandLineRunner {
 
     private Map<String, Object> buildParams(StationConfig config) {
         String protocol = config.getProtocol();
+        Map<String, Object> params = new HashMap<>();
 
-        if ("MODBUS_RTU".equals(protocol)) {
-            if (config.getExtraParams() != null && !config.getExtraParams().isEmpty()) {
-                try {
-                    return objectMapper.readValue(config.getExtraParams(), new TypeReference<Map<String, Object>>() {});
-                } catch (Exception e) {
-                    log.error("解析 extraParams 失败: stationId={}, error={}", config.getStationId(), e.getMessage());
-                }
+        if (config.getExtraParams() != null && !config.getExtraParams().isEmpty()) {
+            try {
+                params.putAll(objectMapper.readValue(config.getExtraParams(), new TypeReference<Map<String, Object>>() {}));
+            } catch (Exception e) {
+                log.error("解析 extraParams 失败: stationId={}, error={}", config.getStationId(), e.getMessage());
             }
-            return new HashMap<>();
         }
 
-        // MODBUS_TCP / IEC_104
-        Map<String, Object> params = new HashMap<>();
-        params.put("host", config.getHost());
-        params.put("port", config.getPort());
+        if (!"MODBUS_RTU".equals(protocol)) {
+            params.put("host", config.getHost());
+            params.put("port", config.getPort());
+        }
+
         return params;
     }
 }

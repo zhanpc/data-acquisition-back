@@ -15,8 +15,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.net.InetAddress;
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Modbus TCP 数据采集服务
@@ -31,8 +31,8 @@ public class ModbusTcpService implements ProtocolHandler {
     @Autowired
     private DataProducer dataProducer;
 
-    private Map<String, TCPMasterConnection> connectionMap = new HashMap<>();
-    private Map<String, Integer> connectionStationMap = new HashMap<>();
+    private final Map<String, TCPMasterConnection> connectionMap = new ConcurrentHashMap<>();
+    private final Map<String, Integer> connectionStationMap = new ConcurrentHashMap<>();
 
     @Override
     public String getProtocolType() {
@@ -91,13 +91,13 @@ public class ModbusTcpService implements ProtocolHandler {
             result[i] = registers[i].getValue();
         }
 
-        processModbusData(connectionId, address, result);
+        processRegisterData(connectionId, unitId, address, result, "HOLDING");
 
         log.info("读取保持寄存器成功: unitId={}, address={}, quantity={}", unitId, address, quantity);
         return result;
     }
 
-    private void processModbusData(String connectionId, int startAddress, int[] values) {
+    private void processRegisterData(String connectionId, int unitId, int startAddress, int[] values, String registerType) {
         Integer stationId = connectionStationMap.get(connectionId);
         if (stationId == null) {
             return;
@@ -105,27 +105,49 @@ public class ModbusTcpService implements ProtocolHandler {
 
         for (int i = 0; i < values.length; i++) {
             int address = startAddress + i;
-            PointConfig pointConfig = configCache.getPointConfigByAddress(stationId, address);
+            PointConfig pointConfig = configCache.getPointConfigByAddressAndRegisterType(stationId, address, registerType);
 
             if (pointConfig == null) {
                 continue;
             }
 
-            DataPoint dataPoint = DataPoint.builder()
-                    .stationId(stationId)
-                    .pointId(pointConfig.getPointId())
-                    .pointName(pointConfig.getPointName())
-                    .timestamp(System.currentTimeMillis())
-                    .value((double) values[i])
-                    .quality(1)
-                    .tableName(pointConfig.getTableName())
-                    .slaveId(1)
-                    .address(address)
-                    .registerType("HOLDING")
-                    .build();
-
-            dataProducer.send(dataPoint);
+            sendDataPoint(stationId, pointConfig, unitId, address, (double) values[i], registerType);
         }
+    }
+
+    private void processBooleanData(String connectionId, int unitId, int startAddress, boolean[] values, String registerType) {
+        Integer stationId = connectionStationMap.get(connectionId);
+        if (stationId == null) {
+            return;
+        }
+
+        for (int i = 0; i < values.length; i++) {
+            int address = startAddress + i;
+            PointConfig pointConfig = configCache.getPointConfigByAddressAndRegisterType(stationId, address, registerType);
+
+            if (pointConfig == null) {
+                continue;
+            }
+
+            sendDataPoint(stationId, pointConfig, unitId, address, values[i] ? 1D : 0D, registerType);
+        }
+    }
+
+    private void sendDataPoint(Integer stationId, PointConfig pointConfig, int unitId, int address, double value, String registerType) {
+        DataPoint dataPoint = DataPoint.builder()
+                .stationId(stationId)
+                .pointId(pointConfig.getPointId())
+                .pointName(pointConfig.getPointName())
+                .timestamp(System.currentTimeMillis())
+                .value(value)
+                .quality(1)
+                .tableName(pointConfig.getTableName())
+                .slaveId(unitId)
+                .address(address)
+                .registerType(registerType)
+                .build();
+
+        dataProducer.send(dataPoint);
     }
 
     /**
@@ -152,7 +174,7 @@ public class ModbusTcpService implements ProtocolHandler {
             result[i] = registers[i].getValue();
         }
 
-        processModbusData(connectionId, address, result);
+        processRegisterData(connectionId, unitId, address, result, "INPUT");
 
         log.info("读取输入寄存器成功: unitId={}, address={}, quantity={}", unitId, address, quantity);
         return result;
@@ -182,6 +204,8 @@ public class ModbusTcpService implements ProtocolHandler {
             result[i] = coils.getBit(i);
         }
 
+        processBooleanData(connectionId, unitId, address, result, "COIL");
+
         log.info("读取线圈状态成功: unitId={}, address={}, quantity={}", unitId, address, quantity);
         return result;
     }
@@ -209,6 +233,8 @@ public class ModbusTcpService implements ProtocolHandler {
         for (int i = 0; i < quantity; i++) {
             result[i] = inputs.getBit(i);
         }
+
+        processBooleanData(connectionId, unitId, address, result, "DISCRETE");
 
         log.info("读取离散输入成功: unitId={}, address={}, quantity={}", unitId, address, quantity);
         return result;

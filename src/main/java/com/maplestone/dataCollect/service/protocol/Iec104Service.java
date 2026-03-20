@@ -4,9 +4,11 @@ import com.maplestone.dataCollect.cache.ConfigCache;
 import com.maplestone.dataCollect.dao.entity.PointConfig;
 import com.maplestone.dataCollect.kafka.DataProducer;
 import com.maplestone.dataCollect.pojo.entity.DataPoint;
+import com.maplestone.dataCollect.service.config.StationRuntimeStatusService;
 import lombok.extern.slf4j.Slf4j;
 import org.openmuc.j60870.*;
 import org.openmuc.j60870.ie.*;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -14,6 +16,13 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+
+import javax.annotation.PreDestroy;
 
 /**
  * IEC 60870-5-104 数据采集服务
@@ -22,14 +31,37 @@ import java.util.Map;
 @Service
 public class Iec104Service implements ProtocolHandler {
 
+    private static final String PARAM_HOST = "host";
+    private static final String PARAM_PORT = "port";
+    private static final String PARAM_COMMON_ADDRESS = "commonAddress";
+    private static final String PARAM_COA = "coa";
+
     @Autowired
     private ConfigCache configCache;
 
     @Autowired
     private DataProducer dataProducer;
 
-    private Map<String, Connection> connectionMap = new HashMap<>();
-    private Map<String, Integer> connectionStationMap = new HashMap<>();
+    @Autowired
+    private StationRuntimeStatusService stationRuntimeStatusService;
+
+    @Value("${data-acquisition.iec104.auto-general-interrogation:true}")
+    private boolean autoGeneralInterrogation;
+
+    @Value("${data-acquisition.iec104.general-interrogation-delay-ms:2000}")
+    private long generalInterrogationDelayMs;
+
+    @Value("${data-acquisition.iec104.reconnect-delay-ms:5000}")
+    private long reconnectDelayMs;
+
+    private final Map<String, Connection> connectionMap = new ConcurrentHashMap<>();
+    private final Map<String, Integer> connectionStationMap = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Object>> connectionParamMap = new ConcurrentHashMap<>();
+    private final Set<String> reconnectingConnections = ConcurrentHashMap.newKeySet();
+    private final Set<String> manualDisconnectConnections = ConcurrentHashMap.newKeySet();
+    private final ScheduledExecutorService reconnectExecutor = Executors.newSingleThreadScheduledExecutor();
+
+    private volatile boolean shuttingDown = false;
 
     @Override
     public String getProtocolType() {
@@ -38,17 +70,28 @@ public class Iec104Service implements ProtocolHandler {
 
     @Override
     public boolean connect(String connectionId, Integer stationId, Map<String, Object> params) {
-        String host = (String) params.get("host");
-        int port = ((Number) params.get("port")).intValue();
-        return connect(connectionId, stationId, host, port);
+        Map<String, Object> safeParams = new HashMap<>(params);
+        connectionParamMap.put(connectionId, safeParams);
+        connectionStationMap.put(connectionId, stationId);
+        manualDisconnectConnections.remove(connectionId);
+        reconnectingConnections.remove(connectionId);
+        return doConnect(connectionId, stationId, safeParams);
     }
 
     /**
      * 连接 IEC 104 设备
      */
     public boolean connect(String connectionId, Integer stationId, String host, int port) {
-        connectionStationMap.put(connectionId, stationId);
+        Map<String, Object> params = new HashMap<>();
+        params.put(PARAM_HOST, host);
+        params.put(PARAM_PORT, port);
+        return connect(connectionId, stationId, params);
+    }
+
+    private boolean doConnect(String connectionId, Integer stationId, Map<String, Object> params) {
         try {
+            String host = (String) params.get(PARAM_HOST);
+            int port = ((Number) params.get(PARAM_PORT)).intValue();
             InetAddress address = InetAddress.getByName(host);
 
             Connection connection = new ClientConnectionBuilder(address)
@@ -61,10 +104,12 @@ public class Iec104Service implements ProtocolHandler {
 
                         @Override
                         public void connectionClosed(Connection conn, IOException e) {
+                            connectionMap.remove(connectionId, conn);
                             log.warn("IEC 104 连接关闭: {}", connectionId);
                             if (e != null) {
                                 log.error("连接关闭异常: {}", e.getMessage());
                             }
+                            scheduleReconnect(connectionId);
                         }
 
                         @Override
@@ -78,11 +123,15 @@ public class Iec104Service implements ProtocolHandler {
 
             // 启动数据传输
             connection.startDataTransfer();
+            triggerGeneralInterrogation(connectionId, stationId, params);
+            stationRuntimeStatusService.markConnectSuccess(stationId);
 
             log.info("IEC 104 连接成功: {}:{}", host, port);
             return true;
-        } catch (IOException e) {
+        } catch (Exception e) {
+            stationRuntimeStatusService.markConnectFailure(stationId, e.getMessage());
             log.error("IEC 104 连接失败: {}", e.getMessage());
+            scheduleReconnect(connectionId);
             return false;
         }
     }
@@ -168,6 +217,69 @@ public class Iec104Service implements ProtocolHandler {
         log.info("发送总召唤命令: connectionId={}, COA={}", connectionId, commonAddress);
     }
 
+    private void triggerGeneralInterrogation(String connectionId, Integer stationId, Map<String, Object> params) {
+        if (!autoGeneralInterrogation) {
+            return;
+        }
+
+        int commonAddress = resolveCommonAddress(stationId, params);
+        reconnectExecutor.schedule(() -> {
+            try {
+                generalInterrogation(connectionId, commonAddress);
+            } catch (Exception e) {
+                log.error("自动总召失败: connectionId={}, COA={}, error={}", connectionId, commonAddress, e.getMessage());
+            }
+        }, Math.max(generalInterrogationDelayMs, 0L), TimeUnit.MILLISECONDS);
+    }
+
+    private int resolveCommonAddress(Integer stationId, Map<String, Object> params) {
+        Object commonAddress = params.get(PARAM_COMMON_ADDRESS);
+        if (commonAddress instanceof Number) {
+            return ((Number) commonAddress).intValue();
+        }
+
+        Object coa = params.get(PARAM_COA);
+        if (coa instanceof Number) {
+            return ((Number) coa).intValue();
+        }
+
+        return stationId != null ? stationId : 1;
+    }
+
+    private void scheduleReconnect(String connectionId) {
+        if (shuttingDown || manualDisconnectConnections.contains(connectionId)) {
+            return;
+        }
+
+        Integer stationId = connectionStationMap.get(connectionId);
+        Map<String, Object> params = connectionParamMap.get(connectionId);
+        if (stationId == null || params == null) {
+            return;
+        }
+
+        if (!reconnectingConnections.add(connectionId)) {
+            return;
+        }
+
+        reconnectExecutor.schedule(() -> {
+            try {
+                if (shuttingDown || manualDisconnectConnections.contains(connectionId)) {
+                    return;
+                }
+
+                log.info("开始重连 IEC 104: connectionId={}", connectionId);
+                boolean success = doConnect(connectionId, stationId, new HashMap<>(params));
+                if (!success && !shuttingDown && !manualDisconnectConnections.contains(connectionId)) {
+                    reconnectingConnections.remove(connectionId);
+                    scheduleReconnect(connectionId);
+                    return;
+                }
+            } finally {
+                reconnectingConnections.remove(connectionId);
+            }
+        }, Math.max(reconnectDelayMs, 1000L), TimeUnit.MILLISECONDS);
+    }
+
 
     /**
      * 发送单点命令
@@ -209,24 +321,38 @@ public class Iec104Service implements ProtocolHandler {
      * 断开连接
      */
     public void disconnect(String connectionId) {
+        manualDisconnectConnections.add(connectionId);
+        reconnectingConnections.remove(connectionId);
         Connection connection = connectionMap.get(connectionId);
         if (connection != null) {
             connection.close();
             connectionMap.remove(connectionId);
-            connectionStationMap.remove(connectionId);
-            log.info("IEC 104 连接已断开: {}", connectionId);
         }
+        connectionStationMap.remove(connectionId);
+        connectionParamMap.remove(connectionId);
+        log.info("IEC 104 连接已断开: {}", connectionId);
     }
 
     /**
      * 断开所有连接
      */
     public void disconnectAll() {
+        shuttingDown = true;
+        manualDisconnectConnections.addAll(connectionMap.keySet());
         connectionMap.forEach((id, connection) -> {
             connection.close();
             log.info("IEC 104 连接已断开: {}", id);
         });
         connectionMap.clear();
         connectionStationMap.clear();
+        connectionParamMap.clear();
+        reconnectingConnections.clear();
+        manualDisconnectConnections.clear();
+    }
+
+    @PreDestroy
+    public void shutdownExecutor() {
+        shuttingDown = true;
+        reconnectExecutor.shutdownNow();
     }
 }

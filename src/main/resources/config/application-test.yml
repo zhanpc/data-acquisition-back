@@ -13,7 +13,7 @@ spring:
   kafka:
     bootstrap-servers: 192.168.3.55:9092
     producer:
-      acks: 1
+      acks: all
       retries: 10
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
@@ -31,12 +31,26 @@ spring:
         spring.json.trusted.packages: com.maplestone.dataCollect.pojo.entity
 
 # TDengine 数据源配置（时序数据）
+# mode:
+#   native -> 使用本机 JNI/Native 客户端，适合已安装 TDengine client 的服务器
+#   ws     -> 使用非 native 的 RS 方式，不依赖本机 TDengine client，适合本地开发机
 tdengine:
-  datasource:
-    driver-class-name: com.taosdata.jdbc.TSDBDriver
-    url: jdbc:TAOS://192.168.3.55:6030/iot_data?charset=UTF-8&locale=en_US.UTF-8&timezone=UTC-8
+  connection:
+    mode: ws
+    database: iot_data
     username: root
     password: taosdata
+    charset: UTF-8
+    locale: en_US.UTF-8
+    timezone: UTC-8
+    native-config:
+      driver-class-name: com.taosdata.jdbc.TSDBDriver
+      host: 192.168.3.55
+      port: 6030
+    ws:
+      driver-class-name: com.taosdata.jdbc.rs.RestfulDriver
+      host: 192.168.3.55
+      port: 6041
 
 redis:
   host: 192.168.3.55
@@ -58,6 +72,16 @@ wal:
   max-file-size: 10485760  # 10MB
   retention-hours: 24
 
-
-
-
+data-acquisition:
+  modbus:
+    enabled: true
+    initial-delay-ms: 10000
+    poll-interval-ms: 5000
+    reconnect-enabled: true
+    reconnect-initial-delay-ms: 10000
+    reconnect-interval-ms: 5000
+    max-reconnect-attempts: 5
+  iec104:
+    auto-general-interrogation: true
+    general-interrogation-delay-ms: 2000
+    reconnect-delay-ms: 5000

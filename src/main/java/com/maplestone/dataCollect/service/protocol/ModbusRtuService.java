@@ -1,5 +1,9 @@
 package com.maplestone.dataCollect.service.protocol;
 
+import com.maplestone.dataCollect.cache.ConfigCache;
+import com.maplestone.dataCollect.dao.entity.PointConfig;
+import com.maplestone.dataCollect.kafka.DataProducer;
+import com.maplestone.dataCollect.pojo.entity.DataPoint;
 import lombok.extern.slf4j.Slf4j;
 import net.wimpi.modbus.io.ModbusSerialTransaction;
 import net.wimpi.modbus.msg.*;
@@ -7,10 +11,12 @@ import net.wimpi.modbus.net.SerialConnection;
 import net.wimpi.modbus.procimg.InputRegister;
 import net.wimpi.modbus.procimg.Register;
 import net.wimpi.modbus.util.SerialParameters;
+import net.wimpi.modbus.util.BitVector;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Modbus RTU 数据采集服务
@@ -19,7 +25,14 @@ import java.util.Map;
 @Service
 public class ModbusRtuService implements ProtocolHandler {
 
-    private Map<String, SerialConnection> connectionMap = new HashMap<>();
+    @Autowired
+    private ConfigCache configCache;
+
+    @Autowired
+    private DataProducer dataProducer;
+
+    private final Map<String, SerialConnection> connectionMap = new ConcurrentHashMap<>();
+    private final Map<String, Integer> connectionStationMap = new ConcurrentHashMap<>();
 
     @Override
     public String getProtocolType() {
@@ -33,7 +46,7 @@ public class ModbusRtuService implements ProtocolHandler {
         int dataBits = params.containsKey("dataBits") ? ((Number) params.get("dataBits")).intValue() : 8;
         int stopBits = params.containsKey("stopBits") ? ((Number) params.get("stopBits")).intValue() : 1;
         String parity = params.containsKey("parity") ? (String) params.get("parity") : "None";
-        return connect(connectionId, portName, baudRate, dataBits, stopBits, parity);
+        return connect(connectionId, stationId, portName, baudRate, dataBits, stopBits, parity);
     }
 
     /**
@@ -45,8 +58,9 @@ public class ModbusRtuService implements ProtocolHandler {
      * @param stopBits 停止位 (1, 2)
      * @param parity 校验位 ("None", "Even", "Odd")
      */
-    public boolean connect(String connectionId, String portName, int baudRate,
+    public boolean connect(String connectionId, Integer stationId, String portName, int baudRate,
                           int dataBits, int stopBits, String parity) {
+        connectionStationMap.put(connectionId, stationId);
         try {
             SerialParameters params = new SerialParameters();
             params.setPortName(portName);
@@ -65,6 +79,7 @@ public class ModbusRtuService implements ProtocolHandler {
             return true;
         } catch (Exception e) {
             log.error("Modbus RTU 连接失败: {}", e.getMessage());
+            connectionStationMap.remove(connectionId);
             return false;
         }
     }
@@ -93,8 +108,153 @@ public class ModbusRtuService implements ProtocolHandler {
             result[i] = registers[i].getValue();
         }
 
+        processRegisterData(connectionId, unitId, address, result, "HOLDING");
+
         log.info("读取保持寄存器成功: unitId={}, address={}, quantity={}", unitId, address, quantity);
         return result;
+    }
+
+    /**
+     * 读取输入寄存器
+     */
+    public int[] readInputRegisters(String connectionId, int unitId, int address, int quantity) throws Exception {
+        SerialConnection connection = connectionMap.get(connectionId);
+        if (connection == null) {
+            throw new IllegalStateException("连接不存在: " + connectionId);
+        }
+
+        ReadInputRegistersRequest request = new ReadInputRegistersRequest(address, quantity);
+        request.setUnitID(unitId);
+
+        ModbusSerialTransaction transaction = new ModbusSerialTransaction(connection);
+        transaction.setRequest(request);
+        transaction.execute();
+
+        ReadInputRegistersResponse response = (ReadInputRegistersResponse) transaction.getResponse();
+        InputRegister[] registers = response.getRegisters();
+
+        int[] result = new int[registers.length];
+        for (int i = 0; i < registers.length; i++) {
+            result[i] = registers[i].getValue();
+        }
+
+        processRegisterData(connectionId, unitId, address, result, "INPUT");
+
+        log.info("读取输入寄存器成功: unitId={}, address={}, quantity={}", unitId, address, quantity);
+        return result;
+    }
+
+    /**
+     * 读取线圈状态
+     */
+    public boolean[] readCoils(String connectionId, int unitId, int address, int quantity) throws Exception {
+        SerialConnection connection = connectionMap.get(connectionId);
+        if (connection == null) {
+            throw new IllegalStateException("连接不存在: " + connectionId);
+        }
+
+        ReadCoilsRequest request = new ReadCoilsRequest(address, quantity);
+        request.setUnitID(unitId);
+
+        ModbusSerialTransaction transaction = new ModbusSerialTransaction(connection);
+        transaction.setRequest(request);
+        transaction.execute();
+
+        ReadCoilsResponse response = (ReadCoilsResponse) transaction.getResponse();
+        BitVector coils = response.getCoils();
+
+        boolean[] result = new boolean[quantity];
+        for (int i = 0; i < quantity; i++) {
+            result[i] = coils.getBit(i);
+        }
+
+        processBooleanData(connectionId, unitId, address, result, "COIL");
+
+        log.info("读取线圈状态成功: unitId={}, address={}, quantity={}", unitId, address, quantity);
+        return result;
+    }
+
+    /**
+     * 读取离散输入
+     */
+    public boolean[] readDiscreteInputs(String connectionId, int unitId, int address, int quantity) throws Exception {
+        SerialConnection connection = connectionMap.get(connectionId);
+        if (connection == null) {
+            throw new IllegalStateException("连接不存在: " + connectionId);
+        }
+
+        ReadInputDiscretesRequest request = new ReadInputDiscretesRequest(address, quantity);
+        request.setUnitID(unitId);
+
+        ModbusSerialTransaction transaction = new ModbusSerialTransaction(connection);
+        transaction.setRequest(request);
+        transaction.execute();
+
+        ReadInputDiscretesResponse response = (ReadInputDiscretesResponse) transaction.getResponse();
+        BitVector inputs = response.getDiscretes();
+
+        boolean[] result = new boolean[quantity];
+        for (int i = 0; i < quantity; i++) {
+            result[i] = inputs.getBit(i);
+        }
+
+        processBooleanData(connectionId, unitId, address, result, "DISCRETE");
+
+        log.info("读取离散输入成功: unitId={}, address={}, quantity={}", unitId, address, quantity);
+        return result;
+    }
+
+    private void processRegisterData(String connectionId, int unitId, int startAddress, int[] values, String registerType) {
+        Integer stationId = connectionStationMap.get(connectionId);
+        if (stationId == null) {
+            return;
+        }
+
+        for (int i = 0; i < values.length; i++) {
+            int address = startAddress + i;
+            PointConfig pointConfig = configCache.getPointConfigByAddressAndRegisterType(stationId, address, registerType);
+
+            if (pointConfig == null) {
+                continue;
+            }
+
+            sendDataPoint(stationId, pointConfig, unitId, address, (double) values[i], registerType);
+        }
+    }
+
+    private void processBooleanData(String connectionId, int unitId, int startAddress, boolean[] values, String registerType) {
+        Integer stationId = connectionStationMap.get(connectionId);
+        if (stationId == null) {
+            return;
+        }
+
+        for (int i = 0; i < values.length; i++) {
+            int address = startAddress + i;
+            PointConfig pointConfig = configCache.getPointConfigByAddressAndRegisterType(stationId, address, registerType);
+
+            if (pointConfig == null) {
+                continue;
+            }
+
+            sendDataPoint(stationId, pointConfig, unitId, address, values[i] ? 1D : 0D, registerType);
+        }
+    }
+
+    private void sendDataPoint(Integer stationId, PointConfig pointConfig, int unitId, int address, double value, String registerType) {
+        DataPoint dataPoint = DataPoint.builder()
+                .stationId(stationId)
+                .pointId(pointConfig.getPointId())
+                .pointName(pointConfig.getPointName())
+                .timestamp(System.currentTimeMillis())
+                .value(value)
+                .quality(1)
+                .tableName(pointConfig.getTableName())
+                .slaveId(unitId)
+                .address(address)
+                .registerType(registerType)
+                .build();
+
+        dataProducer.send(dataPoint);
     }
 
     /**
@@ -117,6 +277,49 @@ public class ModbusRtuService implements ProtocolHandler {
     }
 
     /**
+     * 写单个线圈
+     */
+    public void writeSingleCoil(String connectionId, int unitId, int address, boolean value) throws Exception {
+        SerialConnection connection = connectionMap.get(connectionId);
+        if (connection == null) {
+            throw new IllegalStateException("连接不存在: " + connectionId);
+        }
+
+        WriteCoilRequest request = new WriteCoilRequest(address, value);
+        request.setUnitID(unitId);
+
+        ModbusSerialTransaction transaction = new ModbusSerialTransaction(connection);
+        transaction.setRequest(request);
+        transaction.execute();
+
+        log.info("写单个线圈成功: unitId={}, address={}, value={}", unitId, address, value);
+    }
+
+    /**
+     * 写多个保持寄存器
+     */
+    public void writeMultipleRegisters(String connectionId, int unitId, int address, int[] values) throws Exception {
+        SerialConnection connection = connectionMap.get(connectionId);
+        if (connection == null) {
+            throw new IllegalStateException("连接不存在: " + connectionId);
+        }
+
+        Register[] registers = new Register[values.length];
+        for (int i = 0; i < values.length; i++) {
+            registers[i] = new net.wimpi.modbus.procimg.SimpleRegister(values[i]);
+        }
+
+        WriteMultipleRegistersRequest request = new WriteMultipleRegistersRequest(address, registers);
+        request.setUnitID(unitId);
+
+        ModbusSerialTransaction transaction = new ModbusSerialTransaction(connection);
+        transaction.setRequest(request);
+        transaction.execute();
+
+        log.info("写多个寄存器成功: unitId={}, address={}, quantity={}", unitId, address, values.length);
+    }
+
+    /**
      * 断开连接
      */
     public void disconnect(String connectionId) {
@@ -124,6 +327,7 @@ public class ModbusRtuService implements ProtocolHandler {
         if (connection != null) {
             connection.close();
             connectionMap.remove(connectionId);
+            connectionStationMap.remove(connectionId);
             log.info("Modbus RTU 连接已断开: {}", connectionId);
         }
     }
@@ -137,5 +341,6 @@ public class ModbusRtuService implements ProtocolHandler {
             log.info("Modbus RTU 连接已断开: {}", id);
         });
         connectionMap.clear();
+        connectionStationMap.clear();
     }
 }

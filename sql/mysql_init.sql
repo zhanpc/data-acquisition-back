@@ -18,6 +18,11 @@ CREATE TABLE IF NOT EXISTS station_config (
     host VARCHAR(100) DEFAULT NULL COMMENT 'TCP/IP 设备主机地址，RTU 可为空',
     port INT DEFAULT NULL COMMENT 'TCP/IP 设备端口，RTU 可为空',
     status TINYINT DEFAULT 1 COMMENT '状态: 0-禁用 1-启用',
+    connect_status TINYINT DEFAULT 0 COMMENT '连接状态: 0-未连接 1-已连接 2-重连失败',
+    reconnect_fail_count INT DEFAULT 0 COMMENT '连续重连失败次数',
+    last_error VARCHAR(500) DEFAULT NULL COMMENT '最近一次连接错误信息',
+    last_connect_time TIMESTAMP NULL DEFAULT NULL COMMENT '最近一次连接成功时间',
+    last_retry_time TIMESTAMP NULL DEFAULT NULL COMMENT '最近一次重连尝试时间',
     extra_params TEXT COMMENT '扩展参数(JSON)，用于 MODBUS_RTU 等协议',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -80,10 +85,10 @@ CREATE TABLE IF NOT EXISTS alarm_history (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='告警历史表';
 
 -- 插入测试数据
-INSERT INTO station_config (station_id, station_name, protocol, host, port, status, extra_params) VALUES
-(1, '测试场站001', 'IEC_104', '192.168.1.100', 2404, 1, NULL),
-(2, '测试场站002', 'MODBUS_TCP', '192.168.1.101', 502, 1, NULL),
-(3, '测试场站003', 'MODBUS_RTU', NULL, NULL, 1, '{"portName":"COM1","baudRate":9600,"dataBits":8,"stopBits":1,"parity":"None"}');
+INSERT INTO station_config (station_id, station_name, protocol, host, port, status, connect_status, reconnect_fail_count, extra_params) VALUES
+(1, '测试场站001', 'IEC_104', '192.168.1.100', 2404, 1, 0, 0, '{"commonAddress":1}'),
+(2, '测试场站002', 'MODBUS_TCP', '192.168.1.101', 502, 1, 0, 0, '{"slaveId":1}'),
+(3, '测试场站003', 'MODBUS_RTU', NULL, NULL, 1, 0, 0, '{"portName":"COM1","baudRate":9600,"dataBits":8,"stopBits":1,"parity":"None","slaveId":1}');
 
 INSERT INTO point_config (station_id, point_id, point_name, data_type, unit, table_name, ioa) VALUES
 (1, 1, '电压', 'FLOAT', 'V', 'pt_1_1', 1001),
@@ -94,6 +99,7 @@ INSERT INTO point_config (station_id, point_id, point_name, data_type, unit, tab
 (2, 1, '温度', 'FLOAT', '℃', 'pt_2_1', 0, 'HOLDING'),
 (2, 2, '湿度', 'FLOAT', '%', 'pt_2_2', 1, 'HOLDING'),
 (2, 3, '压力', 'FLOAT', 'Pa', 'pt_2_3', 2, 'HOLDING'),
+(2, 4, '运行线圈', 'BOOL', NULL, 'pt_2_4', 0, 'COIL'),
 (3, 1, '流量', 'FLOAT', 'm3/h', 'pt_3_1', 0, 'HOLDING');
 
 INSERT INTO alarm_rule (station_id, point_id, upper_limit, lower_limit, alarm_level, enabled) VALUES

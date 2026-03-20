@@ -31,6 +31,11 @@ public class StationConfig implements Serializable {
     private String host;
     private Integer port;
     private Integer status;
+    private Integer connectStatus;
+    private Integer reconnectFailCount;
+    private String lastError;
+    private Date lastConnectTime;
+    private Date lastRetryTime;
     private String extraParams; // JSON格式，存协议特有参数，如 RTU 的串口配置
     private Date createdAt;
     private Date updatedAt;

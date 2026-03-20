@@ -29,4 +29,6 @@ CREATE TABLE IF NOT EXISTS pt_2_2 USING modbus_data TAGS (2, 2, '湿度', 1, 'HO
 
 CREATE TABLE IF NOT EXISTS pt_2_3 USING modbus_data TAGS (2, 3, '压力', 2, 'HOLDING');
 
+CREATE TABLE IF NOT EXISTS pt_2_4 USING modbus_data TAGS (2, 4, '运行线圈', 0, 'COIL');
+
 CREATE TABLE IF NOT EXISTS pt_3_1 USING modbus_data TAGS (3, 1, '流量', 0, 'HOLDING');

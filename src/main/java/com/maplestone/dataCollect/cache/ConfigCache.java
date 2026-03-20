@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * 配置缓存 - 内存缓存，避免频繁访问数据库
@@ -64,6 +65,22 @@ public class ConfigCache {
                 .orElse(null);
     }
 
+    public PointConfig getPointConfigByAddressAndRegisterType(Integer stationId, Integer address, String registerType) {
+        return pointConfigMap.values().stream()
+                .filter(config -> config.getStationId().equals(stationId)
+                        && config.getAddress() != null
+                        && config.getAddress().equals(address)
+                        && registerTypeMatches(config.getRegisterType(), registerType))
+                .findFirst()
+                .orElse(null);
+    }
+
+    public List<PointConfig> getPointConfigsByStation(Integer stationId) {
+        return pointConfigMap.values().stream()
+                .filter(config -> config.getStationId().equals(stationId))
+                .collect(Collectors.toList());
+    }
+
     public Map<Integer, StationConfig> getAllStationConfigs() {
         return new ConcurrentHashMap<>(stationConfigMap);
     }
@@ -76,5 +93,12 @@ public class ConfigCache {
 
     private String buildPointKey(Integer stationId, Integer pointId) {
         return stationId + "_" + pointId;
+    }
+
+    private boolean registerTypeMatches(String source, String target) {
+        if (source == null || target == null) {
+            return source == null && target == null;
+        }
+        return source.trim().equalsIgnoreCase(target.trim());
     }
 }
