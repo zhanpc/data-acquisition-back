@@ -197,8 +197,8 @@ public class PointConfig {
     private Integer retryCount;      // 重试次数
 
     // 协议特定字段
-    private String protocol;         // IEC104/MODBUS/OPC
-    private Integer ioa;             // IEC104信息对象地址
+    private String protocol;         // IEC_104/MODBUS_TCP/MODBUS_RTU/OPC_UA/OPC_DA
+    private Integer ioa;             // IEC 104信息对象地址
     private Integer address;         // Modbus寄存器地址
     private String opcNodeId;        // OPC节点ID
 
@@ -535,7 +535,7 @@ public class OPCConfig {
   "pointName": "1号主变电压",
   "pointType": "ANALOG",
   "collectFreq": 5,
-  "protocol": "IEC104",
+  "protocol": "IEC_104",
   "ioa": 4001,
   "upperLimit": 220.0,
   "lowerLimit": 200.0
